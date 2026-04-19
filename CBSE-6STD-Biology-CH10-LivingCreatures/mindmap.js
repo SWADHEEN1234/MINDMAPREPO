@@ -262,60 +262,75 @@
     function buildMindmap() {
         clearCanvas();
         state.nodes = [];
-        layoutNode(MINDMAP_DATA, CONFIG.centerX, CONFIG.centerY, 0, null);
+        
+        let currentY = 0;
+        const paddingX = 400; // horizontal spacing between depths
+        const paddingY = 80;  // vertical spacing between leaves
+        
+        // 1. Compute abstract layout
+        function computeLayout(node, depth) {
+            if (!node.children || node.children.length === 0 || !state.expandedIds.has(node.id)) {
+                node.x = depth * paddingX;
+                node.y = currentY;
+                currentY += paddingY;
+            } else {
+                node.x = depth * paddingX;
+                let startY = currentY;
+                node.children.forEach(c => computeLayout(c, depth + 1));
+                let endY = currentY - paddingY;
+                node.y = (startY + endY) / 2;
+            }
+            node.level = depth;
+        }
+        
+        computeLayout(MINDMAP_DATA, 0);
+        
+        // Offset so root starts at centerX/Y
+        const offsetY = CONFIG.centerY - MINDMAP_DATA.y;
+        const offsetX = CONFIG.centerX; 
+        
+        // 2. Create DOM elements
+        function renderNodeTree(data, delayIndex, parentBranchIndex) {
+            const branchIdx = data.branchIndex || parentBranchIndex || 1;
+            const cx = data.x + offsetX;
+            const cy = data.y + offsetY;
+            
+            const nodeInfo = { data, x: cx, y: cy, branchIndex: branchIdx, element: null, width: 0 };
+            state.nodes.push(nodeInfo);
+
+            const el = createNodeElement(data, cx, cy, branchIdx, delayIndex);
+            nodeInfo.element = el;
+            canvas.appendChild(el);
+            
+            if (data.children && data.children.length > 0 && state.expandedIds.has(data.id)) {
+                data.children.forEach((child, i) => {
+                    renderNodeTree(child, delayIndex + i + 1, branchIdx);
+                });
+            }
+        }
+        
+        renderNodeTree(MINDMAP_DATA, 0, null);
+        
+        // 3. Measure widths for connections before scaling down
+        state.nodes.forEach(n => {
+            n.width = n.element.offsetWidth;
+        });
+
+        // 4. Render connections based on real widths
         renderConnections();
+
+        // 5. Hide nodes for animation
+        state.nodes.forEach(n => {
+            n.element.style.transform = "translate(0, -50%) scale(0)";
+            n.element.style.opacity = "0";
+        });
+
         animateNodesIn();
     }
 
     function clearCanvas() {
         canvas.querySelectorAll(".mm-node").forEach(el => el.remove());
         connectionsLayer.innerHTML = "";
-    }
-
-    // ---- LAYOUT ENGINE ----
-    function layoutNode(data, cx, cy, delayIndex, parentBranchIndex) {
-        const branchIdx = data.branchIndex || parentBranchIndex || 1;
-        const nodeInfo = { data, x: cx, y: cy, branchIndex: branchIdx, element: null };
-        state.nodes.push(nodeInfo);
-
-        const el = createNodeElement(data, cx, cy, branchIdx, delayIndex);
-        nodeInfo.element = el;
-        canvas.appendChild(el);
-
-        if (data.children && data.children.length > 0 && state.expandedIds.has(data.id)) {
-            const childCount = data.children.length;
-            let radius, startAngle, totalAngle;
-
-            if (data.level === 0) {
-                radius = CONFIG.level1Radius;
-                startAngle = -Math.PI / 2;
-                totalAngle = Math.PI * 2;
-            } else if (data.level === 1) {
-                radius = CONFIG.level2Radius;
-                const baseAngle = Math.atan2(cy - CONFIG.centerY, cx - CONFIG.centerX);
-                totalAngle = Math.PI * 0.7;
-                startAngle = baseAngle - totalAngle / 2;
-            } else {
-                radius = CONFIG.level3Radius;
-                const baseAngle = Math.atan2(cy - CONFIG.centerY, cx - CONFIG.centerX);
-                totalAngle = Math.PI * 0.5;
-                startAngle = baseAngle - totalAngle / 2;
-            }
-
-            data.children.forEach((child, i) => {
-                let angle;
-                if (data.level === 0) {
-                    angle = startAngle + (totalAngle / childCount) * i;
-                } else {
-                    angle = childCount === 1
-                        ? startAngle + totalAngle / 2
-                        : startAngle + (totalAngle / (childCount - 1 || 1)) * i;
-                }
-                const childX = cx + Math.cos(angle) * radius;
-                const childY = cy + Math.sin(angle) * radius;
-                layoutNode(child, childX, childY, delayIndex + i + 1, branchIdx);
-            });
-        }
     }
 
     // ---- CREATE NODE ELEMENT ----
@@ -325,56 +340,63 @@
         el.dataset.id = data.id;
         el.style.left = x + "px";
         el.style.top = y + "px";
-        el.style.transform = "translate(-50%, -50%) scale(0)";
+        el.style.transform = "translate(0, -50%) scale(1)"; // Initial setup before measuring
 
+        const isExpanded = state.expandedIds.has(data.id);
+        const hasChildren = data.children && data.children.length > 0;
+        
+        // HTML Structure matching new design
+        const labelText = data.label.replace(/\n/g, " ");
+        let innerHTML = `<div class="node-content">`;
+        
         if (data.emoji) {
-            const emojiSpan = document.createElement("span");
-            emojiSpan.className = "node-emoji";
-            emojiSpan.textContent = data.emoji;
-            el.appendChild(emojiSpan);
+            innerHTML += `<span class="node-emoji">${data.emoji}</span>`;
         }
+        
+        innerHTML += `<span class="node-label">${labelText}</span>`;
+        
+        // Info button - empty circle
+        if (data.description || data.fact || data.quiz) {
+            innerHTML += `<div class="node-info-trigger" title="View details">○</div>`;
+        }
+        
+        // Expand chevron
+        if (hasChildren) {
+            innerHTML += `<div class="node-expand-btn ${isExpanded ? 'expanded' : ''}" title="${isExpanded ? 'Collapse' : 'Expand'}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" class="chevron">
+                    <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>`;
+        }
+        
+        innerHTML += `</div>`;
+        el.innerHTML = innerHTML;
 
-        const label = document.createElement("span");
-        label.className = "node-label";
-        label.textContent = data.label.replace(/\n/g, " ");
-        el.appendChild(label);
-
-        // Expand / collapse button
-        if (data.children && data.children.length > 0) {
-            const expandBtn = document.createElement("div");
-            const isExpanded = state.expandedIds.has(data.id);
-            expandBtn.className = "node-expand-btn" + (isExpanded ? " expanded" : "");
-            expandBtn.textContent = "+";
-            expandBtn.title = isExpanded ? "Collapse" : "Expand";
+        // Events
+        const infoTrigger = el.querySelector(".node-info-trigger");
+        if (infoTrigger) {
+            infoTrigger.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openDetail(data);
+            });
+        }
+        
+        const expandBtn = el.querySelector(".node-expand-btn");
+        if (expandBtn) {
             expandBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 toggleExpand(data.id);
             });
-            el.appendChild(expandBtn);
         }
 
-        // Info button
-        if (data.description || data.quiz) {
-            const infoBtn = document.createElement("div");
-            infoBtn.className = "node-info-btn";
-            infoBtn.textContent = "i";
-            infoBtn.title = "Learn more";
-            infoBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                openDetail(data);
-            });
-            el.appendChild(infoBtn);
-        }
-
-        // Main click — expand/collapse + focus
+        // Clicking the node body also opens details if leaf, or expands if not
         el.addEventListener("click", () => {
-            if (data.children && data.children.length > 0) {
-                toggleExpand(data.id);
-            } else {
-                openDetail(data);
-                // Focus on leaf node
-                focusOnSubtree(data.id);
-            }
+             if (hasChildren) {
+                 toggleExpand(data.id);
+             } else {
+                 openDetail(data);
+                 focusOnSubtree(data.id);
+             }
         });
 
         el.dataset.delay = delayIndex;
@@ -387,7 +409,7 @@
         nodeEls.forEach((el) => {
             const delay = parseInt(el.dataset.delay) * CONFIG.animDelay;
             setTimeout(() => {
-                el.style.transform = "translate(-50%, -50%) scale(1)";
+                el.style.transform = "translate(0, -50%) scale(1)";
                 el.style.opacity = "1";
                 el.classList.add("visible");
             }, delay);
@@ -395,16 +417,13 @@
     }
 
     // ============================================================
-    //  EXPAND / COLLAPSE  —  with focus management
+    //  EXPAND / COLLAPSE
     // ============================================================
 
     function toggleExpand(id) {
         if (state.expandedIds.has(id)) {
-            // ---- COLLAPSE ----
             collapseRecursive(id);
             buildMindmap();
-
-            // Focus on the parent of the collapsed node (or root)
             const parentId = findParentId(MINDMAP_DATA, id);
             if (parentId) {
                 focusOnSubtree(parentId);
@@ -412,11 +431,21 @@
                 focusOnSubtree("root");
             }
         } else {
-            // ---- EXPAND ----
+            // Close siblings (accordion style)
+            const parentId = findParentId(MINDMAP_DATA, id);
+            if (parentId) {
+                const parentNode = findNodeData(MINDMAP_DATA, parentId);
+                if (parentNode && parentNode.children) {
+                    parentNode.children.forEach(sibling => {
+                        if (sibling.id !== id && state.expandedIds.has(sibling.id)) {
+                            collapseRecursive(sibling.id);
+                        }
+                    });
+                }
+            }
+            
             state.expandedIds.add(id);
             buildMindmap();
-
-            // Focus on this node + its newly-revealed children
             setTimeout(() => focusOnSubtree(id), 50);
         }
     }
@@ -440,7 +469,6 @@
         return null;
     }
 
-    /** Walk the tree to find the parent of a given node ID */
     function findParentId(tree, targetId, currentParentId = null) {
         if (tree.id === targetId) return currentParentId;
         if (tree.children) {
@@ -468,12 +496,19 @@
             if (!childNode) return;
 
             const branchIdx = child.branchIndex || parentNode.branchIndex;
-            const path = createCurvedPath(parentNode.x, parentNode.y, childNode.x, childNode.y);
+            
+            // X coordinates logic: Parent right side edge -> Child left side edge
+            const x1 = parentNode.x + parentNode.width;
+            const y1 = parentNode.y;
+            const x2 = childNode.x;
+            const y2 = childNode.y;
+
+            const path = createCurvedPath(x1, y1, x2, y2);
             const svgPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
             svgPath.setAttribute("d", path);
             svgPath.setAttribute("class", `connection-path branch-${branchIdx}`);
 
-            const length = estimatePathLength(parentNode.x, parentNode.y, childNode.x, childNode.y);
+            const length = estimatePathLength(x1, y1, x2, y2);
             svgPath.style.strokeDasharray = length;
             svgPath.style.strokeDashoffset = length;
             svgPath.style.transition = `stroke-dashoffset 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94)`;
@@ -485,13 +520,13 @@
     }
 
     function createCurvedPath(x1, y1, x2, y2) {
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        return `M ${x1} ${y1} C ${x1 + dx * 0.4} ${y1}, ${x1 + dx * 0.6} ${y2}, ${x2} ${y2}`;
+        // Horizontal cubic bezier curve
+        const controlOffset = Math.abs(x2 - x1) * 0.5;
+        return `M ${x1} ${y1} C ${x1 + controlOffset} ${y1}, ${x2 - controlOffset} ${y2}, ${x2} ${y2}`;
     }
 
     function estimatePathLength(x1, y1, x2, y2) {
-        return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) * 1.3;
+        return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) * 1.5;
     }
 
     // ============================================================

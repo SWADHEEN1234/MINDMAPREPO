@@ -55,7 +55,7 @@
         initTheme();
         createParticles();
         buildMindmap();
-        focusOnSubtree("root");
+        setTimeout(() => focusOnSubtree("root"), 50);
         bindGlobalEvents();
     }
 
@@ -303,9 +303,14 @@
             }
 
             data.children.forEach((child, i) => {
-                const angle = childCount === 1
-                    ? startAngle + totalAngle / 2
-                    : startAngle + (totalAngle / (childCount - 1 || 1)) * i;
+                let angle;
+                if (data.level === 0) {
+                    angle = startAngle + (totalAngle / childCount) * i;
+                } else {
+                    angle = childCount === 1
+                        ? startAngle + totalAngle / 2
+                        : startAngle + (totalAngle / (childCount - 1 || 1)) * i;
+                }
                 const childX = cx + Math.cos(angle) * radius;
                 const childY = cy + Math.sin(angle) * radius;
                 layoutNode(child, childX, childY, delayIndex + i + 1, branchIdx);
@@ -508,12 +513,12 @@
             </div>`;
         }
 
-        if (data.description) {
+        if (data.fact) {
             html += `<div class="detail-section">
                 <h3>💡 Did You Know?</h3>
                 <div class="fact-card">
                     <span class="fact-icon">🧠</span>
-                    <p>${data.description}</p>
+                    <p>${data.fact}</p>
                 </div>
             </div>`;
         }
@@ -605,6 +610,8 @@
     // ============================================================
 
     function bindGlobalEvents() {
+        document.addEventListener("contextmenu", e => e.preventDefault());
+
         // ---- Mouse pan ----
         viewport.addEventListener("mousedown", (e) => {
             if (e.target.closest(".mm-node") || e.target.closest(".detail-panel")) return;

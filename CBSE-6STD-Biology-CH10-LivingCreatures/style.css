@@ -88,43 +88,15 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* ============ PARTICLES BG ============ */
+/* ============ WATERMARK BG ============ */
 .particles {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 0;
-    overflow: hidden;
+    display: none;
 }
 
-.particle {
-    position: absolute;
-    border-radius: 50%;
-    opacity: 0.15;
-    animation: floatParticle linear infinite;
-}
-
-@keyframes floatParticle {
-    0% {
-        transform: translateY(100vh) scale(0);
-        opacity: 0;
-    }
-
-    10% {
-        opacity: 0.15;
-    }
-
-    90% {
-        opacity: 0.15;
-    }
-
-    100% {
-        transform: translateY(-10vh) scale(1);
-        opacity: 0;
-    }
+body {
+    background-color: var(--bg-primary);
+    background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%2394a3b8' fill-opacity='0.03' fill-rule='evenodd'%3E%3Cpath d='M15 15h10v10h-10zM45 45h10v10h-10zM75 75h10v10h-10zM15 75a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm60-60a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM45 20l5-8 5 8h-10zm0 60l5-8 5 8h-10zM20 45l8 5-8 5v-10zm50 0l8 5-8 5v-10z'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 80px 80px;
 }
 
 /* ============ TOOLBAR ============ */
@@ -240,8 +212,8 @@ body {
 /* ============ MIND MAP NODE ============ */
 .mm-node {
     position: absolute;
-    border-radius: var(--radius-md);
-    padding: 14px 20px;
+    border-radius: 50px; /* Pill shape */
+    padding: 10px 20px;
     cursor: pointer;
     user-select: none;
     transition: all 0.4s var(--ease-smooth);
@@ -250,8 +222,8 @@ body {
     opacity: 0;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    max-width: 240px;
-    text-align: center;
+    width: max-content;
+    max-width: 350px;
 }
 
 .mm-node.visible {
@@ -261,187 +233,96 @@ body {
 
 .mm-node:hover {
     z-index: 20;
-    transform: scale(1.08);
+    transform: scale(1.04);
     box-shadow: var(--shadow-glow);
 }
 
-.mm-node.pulse {
-    animation: nodePulse 0.6s var(--ease-bounce);
+.node-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
-@keyframes nodePulse {
-    0% {
-        transform: scale(1);
-    }
-
-    40% {
-        transform: scale(1.15);
-    }
-
-    100% {
-        transform: scale(1);
-    }
+.node-label {
+    font-size: 14px;
+    font-weight: 600;
 }
 
-/* Central node */
+/* Central node (Level 0) */
 .mm-node.level-0 {
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(59, 130, 246, 0.2));
-    border: 2px solid rgba(168, 85, 247, 0.6);
-    box-shadow: 0 0 40px rgba(168, 85, 247, 0.25), inset 0 0 30px rgba(168, 85, 247, 0.05);
-    padding: 22px 30px;
-    max-width: 280px;
-    border-radius: var(--radius-xl);
+    background: #005af0; /* Blue pill */
+    color: white;
+    box-shadow: 0 4px 15px rgba(0, 90, 240, 0.4);
+    padding: 12px 24px;
 }
 
 .mm-node.level-0 .node-label {
     font-family: 'Outfit', sans-serif;
-    font-size: 18px;
-    font-weight: 800;
-    background: linear-gradient(135deg, #c084fc, #818cf8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.mm-node.level-0 .node-emoji {
-    font-size: 32px;
-    display: block;
-    margin-bottom: 8px;
-    filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.5));
-}
-
-.mm-node.level-0::before {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border-radius: var(--radius-xl);
-    background: conic-gradient(from 180deg, #a855f7, #3b82f6, #10b981, #a855f7);
-    z-index: -1;
-    opacity: 0.4;
-    animation: rotateBorder 6s linear infinite;
-}
-
-@keyframes rotateBorder {
-    100% {
-        filter: hue-rotate(360deg);
-    }
-}
-
-/* Primary branches (Level 1) */
-.mm-node.level-1 {
-    padding: 14px 20px;
-    border-radius: var(--radius-lg);
-    max-width: 220px;
-}
-
-.mm-node.level-1 .node-label {
-    font-family: 'Outfit', sans-serif;
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-}
-
-.mm-node.level-1 .node-emoji {
-    font-size: 22px;
-    display: block;
-    margin-bottom: 6px;
-}
-
-/* Secondary branches (Level 2) */
-.mm-node.level-2 {
-    padding: 10px 16px;
-    border-radius: var(--radius-md);
-    max-width: 200px;
-}
-
-.mm-node.level-2 .node-label {
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.mm-node.level-2 .node-emoji {
     font-size: 16px;
-    margin-right: 6px;
+    font-weight: 700;
 }
 
-/* Tertiary branches (Level 3) */
-.mm-node.level-3 {
-    padding: 8px 14px;
-    border-radius: var(--radius-sm);
-    max-width: 180px;
+.mm-node.level-0 .node-info-trigger, 
+.mm-node.level-0 .node-expand-btn {
+    color: white;
+    border-color: white;
 }
 
-.mm-node.level-3 .node-label {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
+/* Child nodes (Level 1+) */
+.mm-node.level-1, .mm-node.level-2, .mm-node.level-3 {
+    background: var(--bg-card); /* Will be white in light theme */
+    color: var(--text-primary);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
-.mm-node.level-3 .node-emoji {
-    font-size: 13px;
-    margin-right: 4px;
-}
+.mm-node.level-1 .node-label { font-size: 14px; }
+.mm-node.level-2 .node-label { font-size: 13px; }
+.mm-node.level-3 .node-label { font-size: 12px; }
 
-/* Node expand indicator */
-.node-expand-btn {
-    position: absolute;
-    bottom: -10px;
-    left: 50%;
-    transform: translateX(-50%);
+/* Info Trigger (Circle) */
+.node-info-trigger {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: var(--bg-card);
-    border: 2px solid var(--text-muted);
+    border: 1.5px solid currentColor;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 14px;
     color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.3s var(--ease-smooth);
-    z-index: 15;
+    transition: all 0.3s;
+    user-select: none;
+    line-height: 0;
 }
 
-.node-expand-btn:hover {
-    transform: translateX(-50%) scale(1.2);
+.node-info-trigger:hover {
+    background: var(--color-central);
+    color: white;
     border-color: var(--color-central);
-    color: var(--color-central);
+}
+
+/* Expand Button (Chevron) */
+.node-expand-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: currentColor;
+    transition: transform 0.3s var(--ease-smooth);
 }
 
 .node-expand-btn.expanded {
-    transform: translateX(-50%) rotate(45deg);
+    transform: rotate(90deg); /* Rotate down when expanded */
 }
 
-/* Node info icon */
-.node-info-btn {
-    position: absolute;
-    top: -8px;
-    right: -8px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(59, 130, 246, 0.8);
-    border: none;
-    color: white;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: all 0.3s var(--ease-smooth);
-}
-
-.mm-node:hover .node-info-btn {
-    opacity: 1;
-}
-
-.node-info-btn:hover {
+.node-expand-btn:hover {
     transform: scale(1.2);
-    background: rgba(59, 130, 246, 1);
+}
+.node-expand-btn.expanded:hover {
+    transform: rotate(90deg) scale(1.2);
+}
+
+.node-emoji {
+    font-size: 18px;
 }
 
 /* Branch color themes */

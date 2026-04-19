@@ -26,6 +26,7 @@
 
     /* Misc */
     --border-subtle: rgba(148, 163, 184, 0.1);
+    --bg-toolbar: rgba(10, 14, 26, 0.9);
     --shadow-glow: 0 0 30px rgba(168, 85, 247, 0.3);
     --radius-sm: 8px;
     --radius-md: 14px;
@@ -52,6 +53,7 @@ body.light-theme {
 
     /* Misc */
     --border-subtle: rgba(15, 23, 42, 0.1);
+    --bg-toolbar: rgba(248, 250, 252, 0.9);
     --shadow-glow: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 
@@ -132,7 +134,7 @@ body {
     left: 0;
     right: 0;
     height: 64px;
-    background: rgba(10, 14, 26, 0.9);
+    background: var(--bg-toolbar);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--border-subtle);
