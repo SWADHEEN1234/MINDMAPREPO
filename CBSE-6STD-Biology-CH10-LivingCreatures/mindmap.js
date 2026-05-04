@@ -22,6 +22,7 @@
     const state = {
         nodes: [],
         expandedIds: new Set(["root"]),
+        visitedIds: new Set(),  // tracks which nodes have been opened (progress)
         zoom: 0.55,
         panX: 0,
         panY: 0,
@@ -62,16 +63,16 @@
     // ---- THEME ----
     function initTheme() {
         const savedTheme = localStorage.getItem("mindmap-theme");
-        if (savedTheme === "light") {
-            document.body.classList.add("light-theme");
+        if (savedTheme === "dark") {
+            document.body.classList.add("dark-theme");
         }
     }
 
     function toggleTheme() {
-        document.body.classList.toggle("light-theme");
-        const isLight = document.body.classList.contains("light-theme");
-        localStorage.setItem("mindmap-theme", isLight ? "light" : "dark");
-        showToast(isLight ? "☀️ Light mode activated" : "🌙 Dark mode activated", "info");
+        document.body.classList.toggle("dark-theme");
+        const isDark = document.body.classList.contains("dark-theme");
+        localStorage.setItem("mindmap-theme", isDark ? "dark" : "light");
+        showToast(isDark ? "🌙 Dark mode" : "☀️ Light mode", "info");
     }
 
     // ---- PARTICLES ----
@@ -336,51 +337,53 @@
     // ---- CREATE NODE ELEMENT ----
     function createNodeElement(data, x, y, branchIndex, delayIndex) {
         const el = document.createElement("div");
-        el.className = `mm-node level-${data.level} branch-${branchIndex}`;
+        const isExpandedNode = state.expandedIds.has(data.id) && data.children && data.children.length > 0;
+        const isVisited = state.visitedIds.has(data.id);
+        el.className = `mm-node level-${data.level} branch-${branchIndex}${isExpandedNode ? ' is-expanded' : ''}${isVisited ? ' is-visited' : ''}`;
         el.dataset.id = data.id;
         el.style.left = x + "px";
         el.style.top = y + "px";
-        el.style.transform = "translate(0, -50%) scale(1)"; // Initial setup before measuring
+        el.style.transform = "translate(0, -50%) scale(1)";
 
         const isExpanded = state.expandedIds.has(data.id);
         const hasChildren = data.children && data.children.length > 0;
-        
-        // HTML Structure matching new design
+        const hasDetail = data.description || data.fact || data.quiz;
+
         const labelText = data.label.replace(/\n/g, " ");
         let innerHTML = `<div class="node-content">`;
-        
+
         if (data.emoji) {
             innerHTML += `<span class="node-emoji">${data.emoji}</span>`;
         }
-        
+
         innerHTML += `<span class="node-label">${labelText}</span>`;
-        
-        // Info button - empty circle
-        if (data.description || data.fact || data.quiz) {
-            innerHTML += `<div class="node-info-trigger" title="View details">○</div>`;
+
+        // Checkpoint dot — looks like ○ when unvisited, green ✓ circle when visited
+        if (hasDetail) {
+            if (isVisited) {
+                innerHTML += `<div class="node-info-trigger checked" title="Visited ✓">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>`;
+            } else {
+                innerHTML += `<div class="node-info-trigger" title="View details">○</div>`;
+            }
         }
-        
-        // Expand chevron
+
+        // Expand chevron — LEFT-facing (<) since tree flows left→right
         if (hasChildren) {
             innerHTML += `<div class="node-expand-btn ${isExpanded ? 'expanded' : ''}" title="${isExpanded ? 'Collapse' : 'Expand'}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" class="chevron">
-                    <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </div>`;
         }
-        
+
         innerHTML += `</div>`;
         el.innerHTML = innerHTML;
 
-        // Events
-        const infoTrigger = el.querySelector(".node-info-trigger");
-        if (infoTrigger) {
-            infoTrigger.addEventListener("click", (e) => {
-                e.stopPropagation();
-                openDetail(data);
-            });
-        }
-        
+        // Expand button: only handles expand/collapse
         const expandBtn = el.querySelector(".node-expand-btn");
         if (expandBtn) {
             expandBtn.addEventListener("click", (e) => {
@@ -389,14 +392,23 @@
             });
         }
 
-        // Clicking the node body also opens details if leaf, or expands if not
+        // Dot (checkpoint): opens detail panel (auto-marks visited on open)
+        const infoTrigger = el.querySelector(".node-info-trigger");
+        if (infoTrigger) {
+            infoTrigger.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openDetail(data);
+            });
+        }
+
+        // Clicking anywhere on the node body also opens details
         el.addEventListener("click", () => {
-             if (hasChildren) {
-                 toggleExpand(data.id);
-             } else {
-                 openDetail(data);
-                 focusOnSubtree(data.id);
-             }
+            if (hasDetail) {
+                openDetail(data);
+            }
+            if (!hasDetail && hasChildren) {
+                toggleExpand(data.id);
+            }
         });
 
         el.dataset.delay = delayIndex;
@@ -424,13 +436,8 @@
         if (state.expandedIds.has(id)) {
             collapseRecursive(id);
             buildMindmap();
-            const parentId = findParentId(MINDMAP_DATA, id);
-            if (parentId) {
-                focusOnSubtree(parentId);
-            } else {
-                focusOnSubtree("root");
-            }
         } else {
+            let siblingsCollapsed = false;
             // Close siblings (accordion style)
             const parentId = findParentId(MINDMAP_DATA, id);
             if (parentId) {
@@ -439,6 +446,7 @@
                     parentNode.children.forEach(sibling => {
                         if (sibling.id !== id && state.expandedIds.has(sibling.id)) {
                             collapseRecursive(sibling.id);
+                            siblingsCollapsed = true;
                         }
                     });
                 }
@@ -446,7 +454,12 @@
             
             state.expandedIds.add(id);
             buildMindmap();
-            setTimeout(() => focusOnSubtree(id), 50);
+
+            // Only focus if we didn't just replace a sibling branch
+            // This allows stationary camera for sibling swaps, but auto-focus for drilling down
+            if (!siblingsCollapsed) {
+                setTimeout(() => focusOnSubtree(id), 50);
+            }
         }
     }
 
@@ -534,9 +547,32 @@
     // ============================================================
 
     function openDetail(data) {
+        // Mark node as active (gradient stroke)
+        canvas.querySelectorAll(".mm-node.is-active").forEach(n => n.classList.remove("is-active"));
+        const activeEl = canvas.querySelector(`.mm-node[data-id="${data.id}"]`);
+        if (activeEl) activeEl.classList.add("is-active");
+
+        // Auto-mark as visited + update dot in-place (no full rebuild)
+        if (!state.visitedIds.has(data.id)) {
+            state.visitedIds.add(data.id);
+            if (activeEl) {
+                const dot = activeEl.querySelector(".node-info-trigger");
+                if (dot) {
+                    dot.classList.add("checked");
+                    dot.title = "Visited ✓";
+                    dot.textContent = "";  // remove ○ character
+                    dot.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>`;
+                }
+            }
+        }
+
         let html = "";
         if (data.emoji) html += `<span class="detail-emoji">${data.emoji}</span>`;
         html += `<h2>${data.label.replace(/\n/g, " ")}</h2>`;
+
+
         if (data.description) html += `<p class="detail-description">${data.description}</p>`;
 
         if (data.keywords && data.keywords.length > 0) {
@@ -571,6 +607,7 @@
 
     function closeDetail() {
         detailPanel.classList.remove("open");
+        canvas.querySelectorAll(".mm-node.is-active").forEach(n => n.classList.remove("is-active"));
     }
 
     // ============================================================
