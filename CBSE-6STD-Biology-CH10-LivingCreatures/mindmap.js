@@ -189,7 +189,10 @@
     function zoomToFitBBox(bbox) {
         const vw = viewport.offsetWidth;
         const vh = viewport.offsetHeight;
-        const pad = CONFIG.focusPadding;
+        
+        // Use much smaller padding on narrow screens (e.g. mobile)
+        const isMobile = vw < 768;
+        const pad = isMobile ? 30 : CONFIG.focusPadding;
 
         const bboxW = bbox.maxX - bbox.minX;
         const bboxH = bbox.maxY - bbox.minY;
@@ -198,7 +201,11 @@
         const zoomX = (vw - pad * 2) / bboxW;
         const zoomY = (vh - pad * 2) / bboxH;
         let targetZoom = Math.min(zoomX, zoomY);
-        targetZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, targetZoom));
+        
+        // On mobile, if targetZoom is extremely small (e.g., trying to fit a very wide tree
+        // into a portrait screen), clamp it to a readable minimum so nodes aren't microscopic.
+        const effectiveMinZoom = isMobile ? Math.max(0.75, CONFIG.minZoom) : CONFIG.minZoom;
+        targetZoom = Math.max(effectiveMinZoom, Math.min(CONFIG.maxZoom, targetZoom));
 
         // Center of the bbox in world coords
         const cx = (bbox.minX + bbox.maxX) / 2;
@@ -704,8 +711,23 @@
 
         window.addEventListener("mouseup", () => { state.isPanning = false; });
 
-        // ---- Touch pan ----
+        // ---- Touch pan & pinch zoom ----
         let touchStartX, touchStartY, touchStartPanX, touchStartPanY;
+        let initialPinchDistance = null;
+        let initialPinchZoom = null;
+        let initialPinchCenter = null;
+
+        function getDistance(t1, t2) {
+            return Math.sqrt((t2.clientX - t1.clientX) ** 2 + (t2.clientY - t1.clientY) ** 2);
+        }
+
+        function getCenter(t1, t2) {
+            return {
+                x: (t1.clientX + t2.clientX) / 2,
+                y: (t1.clientY + t2.clientY) / 2
+            };
+        }
+
         viewport.addEventListener("touchstart", (e) => {
             if (e.touches.length === 1 && !e.target.closest(".mm-node")) {
                 cancelAnimation();
@@ -713,18 +735,48 @@
                 touchStartY = e.touches[0].clientY;
                 touchStartPanX = state.panX;
                 touchStartPanY = state.panY;
+            } else if (e.touches.length === 2) {
+                cancelAnimation();
+                initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+                initialPinchZoom = state.zoom;
+                const center = getCenter(e.touches[0], e.touches[1]);
+                const rect = viewport.getBoundingClientRect();
+                initialPinchCenter = {
+                    x: center.x - rect.left,
+                    y: center.y - rect.top
+                };
             }
-        }, { passive: true });
+        }, { passive: false });
 
         viewport.addEventListener("touchmove", (e) => {
             if (e.touches.length === 1 && touchStartX !== undefined) {
                 state.panX = touchStartPanX + (e.touches[0].clientX - touchStartX);
                 state.panY = touchStartPanY + (e.touches[0].clientY - touchStartY);
                 applyTransform();
-            }
-        }, { passive: true });
+            } else if (e.touches.length === 2 && initialPinchDistance !== null) {
+                e.preventDefault(); // prevent native scroll/zoom
+                const currentDistance = getDistance(e.touches[0], e.touches[1]);
+                const distanceRatio = currentDistance / initialPinchDistance;
+                
+                const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, initialPinchZoom * distanceRatio));
+                const zoomRatio = newZoom / state.zoom;
 
-        viewport.addEventListener("touchend", () => { touchStartX = undefined; });
+                state.zoom = newZoom;
+                state.panX = initialPinchCenter.x - (initialPinchCenter.x - state.panX) * zoomRatio;
+                state.panY = initialPinchCenter.y - (initialPinchCenter.y - state.panY) * zoomRatio;
+                
+                applyTransform();
+            }
+        }, { passive: false });
+
+        viewport.addEventListener("touchend", (e) => {
+            if (e.touches.length < 2) {
+                initialPinchDistance = null;
+            }
+            if (e.touches.length === 0) {
+                touchStartX = undefined;
+            }
+        });
 
         // ---- Wheel zoom ----
         viewport.addEventListener("wheel", (e) => {
