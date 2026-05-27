@@ -13,7 +13,7 @@
         level2Radius: 220,
         level3Radius: 150,
         animDelay: 60,
-        minZoom: 0.3,
+        minZoom: 0.45,
         maxZoom: 2.5,
         focusPadding: 120,   // px padding when zoom-to-fit
     };
@@ -21,9 +21,9 @@
     // ---- STATE ----
     const state = {
         nodes: [],
-        expandedIds: new Set(["root"]),
+        expandedIds: new Set(),  // start collapsed for progressive disclosure
         visitedIds: new Set(),  // tracks which nodes have been opened (progress)
-        zoom: 0.55,
+        zoom: 0.75,
         panX: 0,
         panY: 0,
         // Smooth animation targets
@@ -56,7 +56,7 @@
         initTheme();
         createParticles();
         buildMindmap();
-        setTimeout(() => focusOnSubtree("root"), 50);
+        setTimeout(() => centerOnNode("root"), 50);
         bindGlobalEvents();
     }
 
@@ -117,7 +117,7 @@
 
         const vw = viewport.offsetWidth;
         const vh = viewport.offsetHeight;
-        const margin = 200; // extra breathing room
+        const margin = 100; // tighter clamp keeps root node visible
 
         // Converted to screen space:  screenX = panX + worldX * zoom
         // We want the bounding box to stay within the viewport ± margin
@@ -149,6 +149,17 @@
         const bbox = getSubtreeBBox(nodeId);
         if (!bbox) return;
         zoomToFitBBox(bbox);
+    }
+
+    /** Center viewport on a node at current zoom, without zoom-to-fit */
+    function centerOnNode(nodeId) {
+        const ni = state.nodes.find(n => n.data.id === nodeId);
+        if (!ni) return;
+        const vw = viewport.offsetWidth;
+        const vh = viewport.offsetHeight;
+        const targetPanX = vw / 2 - ni.x * state.zoom;
+        const targetPanY = vh / 2 - ni.y * state.zoom;
+        animateTo(targetPanX, targetPanY, state.zoom);
     }
 
     /** Get the bounding box (world coords) of a node + visible descendants */
@@ -204,7 +215,7 @@
         
         // On mobile, if targetZoom is extremely small (e.g., trying to fit a very wide tree
         // into a portrait screen), clamp it to a readable minimum so nodes aren't microscopic.
-        const effectiveMinZoom = isMobile ? Math.max(0.75, CONFIG.minZoom) : CONFIG.minZoom;
+        const effectiveMinZoom = isMobile ? Math.max(0.75, CONFIG.minZoom) : Math.max(0.5, CONFIG.minZoom);
         targetZoom = Math.max(effectiveMinZoom, Math.min(CONFIG.maxZoom, targetZoom));
 
         // Center of the bbox in world coords
@@ -463,9 +474,15 @@
             buildMindmap();
 
             // Only focus if we didn't just replace a sibling branch
-            // This allows stationary camera for sibling swaps, but auto-focus for drilling down
             if (!siblingsCollapsed) {
-                setTimeout(() => focusOnSubtree(id), 50);
+                const nodeData = findNodeData(MINDMAP_DATA, id);
+                const childCount = nodeData?.children?.length || 0;
+                if (childCount > 10) {
+                    // Large trees: center on node without zooming out to illegible levels
+                    setTimeout(() => centerOnNode(id), 50);
+                } else {
+                    setTimeout(() => focusOnSubtree(id), 50);
+                }
             }
         }
     }
