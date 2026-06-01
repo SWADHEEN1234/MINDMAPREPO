@@ -58,6 +58,8 @@
         buildMindmap();
         setTimeout(() => centerOnNode("root"), 50);
         bindGlobalEvents();
+        initSidebar();
+        bindScrollbarEvents();
     }
 
     // ---- THEME ----
@@ -100,6 +102,7 @@
     function applyTransform() {
         clampPan();
         canvas.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+        updateScrollbars();
     }
 
     /** Keep the viewport within the bounding box of visible nodes */
@@ -135,6 +138,8 @@
         if (topLimit > bottomLimit) {
             state.panY = Math.min(topLimit, Math.max(bottomLimit, state.panY));
         }
+        
+        state.panLimits = { leftLimit, rightLimit, topLimit, bottomLimit };
     }
 
     // ============================================================
@@ -855,6 +860,226 @@
 
     function resetView() {
         collapseAll();
+    }
+
+    // ============================================================
+    //  SCROLLBARS & SIDEBAR
+    // ============================================================
+
+    function updateScrollbars() {
+        if (!state.panLimits) return;
+        const { leftLimit, rightLimit, topLimit, bottomLimit } = state.panLimits;
+        
+        const scrollbarH = document.getElementById("scrollbarH");
+        const scrollbarHThumb = document.getElementById("scrollbarHThumb");
+        const scrollbarV = document.getElementById("scrollbarV");
+        const scrollbarVThumb = document.getElementById("scrollbarVThumb");
+        
+        if (!scrollbarH || !scrollbarHThumb) return;
+
+        const panXRange = leftLimit - rightLimit;
+        if (panXRange <= 0) {
+            scrollbarHThumb.style.width = "100%";
+            scrollbarHThumb.style.left = "0";
+            scrollbarH.style.opacity = "0";
+            scrollbarH.style.pointerEvents = "none";
+        } else {
+            scrollbarH.style.opacity = "1";
+            scrollbarH.style.pointerEvents = "all";
+            const fracX = (leftLimit - state.panX) / panXRange;
+            const thumbWidthPct = Math.max(10, Math.min(100, (viewport.offsetWidth / (viewport.offsetWidth + panXRange)) * 100));
+            scrollbarHThumb.style.width = `${thumbWidthPct}%`;
+            const leftPct = fracX * (100 - thumbWidthPct);
+            scrollbarHThumb.style.left = `${leftPct}%`;
+        }
+
+        const panYRange = topLimit - bottomLimit;
+        if (panYRange <= 0) {
+            scrollbarVThumb.style.height = "100%";
+            scrollbarVThumb.style.top = "0";
+            scrollbarV.style.opacity = "0";
+            scrollbarV.style.pointerEvents = "none";
+        } else {
+            scrollbarV.style.opacity = "1";
+            scrollbarV.style.pointerEvents = "all";
+            const fracY = (topLimit - state.panY) / panYRange;
+            const thumbHeightPct = Math.max(10, Math.min(100, (viewport.offsetHeight / (viewport.offsetHeight + panYRange)) * 100));
+            scrollbarVThumb.style.height = `${thumbHeightPct}%`;
+            const topPct = fracY * (100 - thumbHeightPct);
+            scrollbarVThumb.style.top = `${topPct}%`;
+        }
+    }
+
+    function bindScrollbarEvents() {
+        const hThumb = document.getElementById("scrollbarHThumb");
+        const vThumb = document.getElementById("scrollbarVThumb");
+        if (!hThumb || !vThumb) return;
+        
+        let isDraggingH = false, isDraggingV = false;
+        let startClientX, startClientY, startPanX, startPanY;
+
+        hThumb.addEventListener("mousedown", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingH = true; startClientX = e.clientX; startPanX = state.panX;
+            cancelAnimation();
+        });
+        
+        vThumb.addEventListener("mousedown", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingV = true; startClientY = e.clientY; startPanY = state.panY;
+            cancelAnimation();
+        });
+
+        window.addEventListener("mousemove", (e) => {
+            if (isDraggingH && state.panLimits) {
+                const dx = e.clientX - startClientX;
+                const track = document.getElementById("scrollbarH");
+                const trackWidth = track.offsetWidth;
+                const thumbWidth = hThumb.offsetWidth;
+                if (trackWidth > thumbWidth) {
+                    const dxFrac = dx / (trackWidth - thumbWidth);
+                    const panXRange = state.panLimits.leftLimit - state.panLimits.rightLimit;
+                    state.panX = startPanX - (dxFrac * panXRange);
+                    applyTransform();
+                }
+            }
+            if (isDraggingV && state.panLimits) {
+                const dy = e.clientY - startClientY;
+                const track = document.getElementById("scrollbarV");
+                const trackHeight = track.offsetHeight;
+                const thumbHeight = vThumb.offsetHeight;
+                if (trackHeight > thumbHeight) {
+                    const dyFrac = dy / (trackHeight - thumbHeight);
+                    const panYRange = state.panLimits.topLimit - state.panLimits.bottomLimit;
+                    state.panY = startPanY - (dyFrac * panYRange);
+                    applyTransform();
+                }
+            }
+        });
+
+        window.addEventListener("mouseup", () => {
+            isDraggingH = false; isDraggingV = false;
+        });
+        
+        // Touch events for scrollbars
+        hThumb.addEventListener("touchstart", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingH = true; startClientX = e.touches[0].clientX; startPanX = state.panX;
+            cancelAnimation();
+        }, { passive: false });
+        
+        vThumb.addEventListener("touchstart", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingV = true; startClientY = e.touches[0].clientY; startPanY = state.panY;
+            cancelAnimation();
+        }, { passive: false });
+        
+        window.addEventListener("touchmove", (e) => {
+            if (isDraggingH && state.panLimits) {
+                const dx = e.touches[0].clientX - startClientX;
+                const track = document.getElementById("scrollbarH");
+                const trackWidth = track.offsetWidth;
+                const thumbWidth = hThumb.offsetWidth;
+                if (trackWidth > thumbWidth) {
+                    const dxFrac = dx / (trackWidth - thumbWidth);
+                    const panXRange = state.panLimits.leftLimit - state.panLimits.rightLimit;
+                    state.panX = startPanX - (dxFrac * panXRange);
+                    applyTransform();
+                }
+            }
+            if (isDraggingV && state.panLimits) {
+                const dy = e.touches[0].clientY - startClientY;
+                const track = document.getElementById("scrollbarV");
+                const trackHeight = track.offsetHeight;
+                const thumbHeight = vThumb.offsetHeight;
+                if (trackHeight > thumbHeight) {
+                    const dyFrac = dy / (trackHeight - thumbHeight);
+                    const panYRange = state.panLimits.topLimit - state.panLimits.bottomLimit;
+                    state.panY = startPanY - (dyFrac * panYRange);
+                    applyTransform();
+                }
+            }
+        }, { passive: false });
+        
+        window.addEventListener("touchend", () => {
+            isDraggingH = false; isDraggingV = false;
+        });
+    }
+
+    function initSidebar() {
+        const btnSidebar = document.getElementById("btnSidebar");
+        const sidebarPanel = document.getElementById("sidebarPanel");
+        const sidebarClose = document.getElementById("sidebarClose");
+        const sidebarSearch = document.getElementById("sidebarSearch");
+        
+        if (!btnSidebar || !sidebarPanel) return;
+        
+        btnSidebar.addEventListener("click", () => {
+            sidebarPanel.classList.toggle("open");
+            if (sidebarPanel.classList.contains("open")) {
+                renderSidebarList("");
+                sidebarSearch.focus();
+            }
+        });
+        
+        sidebarClose.addEventListener("click", () => {
+            sidebarPanel.classList.remove("open");
+        });
+        
+        sidebarSearch.addEventListener("input", (e) => {
+            renderSidebarList(e.target.value);
+        });
+    }
+
+    function renderSidebarList(query) {
+        const listContainer = document.getElementById("sidebarList");
+        if (!listContainer) return;
+        
+        const q = query.toLowerCase();
+        let html = "";
+        
+        const topics = MINDMAP_DATA.children || [];
+        
+        topics.forEach(t => {
+            if (t.label.toLowerCase().includes(q) || (t.keywords && t.keywords.some(k => k.toLowerCase().includes(q)))) {
+                const isVisited = state.visitedIds.has(t.id);
+                html += `
+                    <div class="sidebar-item ${isVisited ? 'visited' : ''}" data-id="${t.id}">
+                        <span class="item-emoji">${t.emoji || '📄'}</span>
+                        <span class="item-label" title="${t.label.replace(/\n/g, ' ')}">${t.label.replace(/\n/g, ' ')}</span>
+                        <div class="item-status">
+                            ${isVisited ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+        
+        if (html === "") {
+            html = `<div style="padding: 20px; text-align: center; color: #6B7280; font-size: 12px;">No topics found.</div>`;
+        }
+        
+        listContainer.innerHTML = html;
+        
+        listContainer.querySelectorAll(".sidebar-item").forEach(item => {
+            item.addEventListener("click", () => {
+                const id = item.dataset.id;
+                if (!state.expandedIds.has("root")) {
+                    state.expandedIds.add("root");
+                    buildMindmap();
+                }
+                setTimeout(() => {
+                    centerOnNode(id);
+                    const nodeData = findNodeData(MINDMAP_DATA, id);
+                    if (nodeData && (nodeData.description || nodeData.fact || nodeData.quiz)) {
+                        openDetail(nodeData);
+                    }
+                    if (window.innerWidth <= 768) {
+                        document.getElementById("sidebarPanel").classList.remove("open");
+                    }
+                }, 100);
+            });
+        });
     }
 
     // ---- START ----

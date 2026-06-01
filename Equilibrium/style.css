@@ -778,17 +778,126 @@ body.dark-theme .icon-sun  { display: block; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
 
+/* Custom Canvas Scrollbars */
+.scrollbar-h {
+    position: absolute; bottom: 12px; left: 16px; right: 16px; height: 8px;
+    background: rgba(0,0,0,0.06); border-radius: 4px; z-index: 80;
+    transition: background 0.3s;
+}
+.scrollbar-v {
+    position: absolute; top: 16px; bottom: 16px; right: 12px; width: 8px;
+    background: rgba(0,0,0,0.06); border-radius: 4px; z-index: 80;
+    transition: background 0.3s;
+}
+body.dark-theme .scrollbar-h, body.dark-theme .scrollbar-v {
+    background: rgba(255,255,255,0.06);
+}
+.scrollbar-thumb {
+    position: absolute; top: 0; left: 0;
+    background: rgba(0, 94, 255, 0.45);
+    border-radius: 4px; cursor: pointer;
+    transition: background 0.2s;
+}
+.scrollbar-h .scrollbar-thumb { height: 100%; }
+.scrollbar-v .scrollbar-thumb { width: 100%; }
+.scrollbar-thumb:hover, .scrollbar-thumb:active {
+    background: rgba(0, 94, 255, 0.8);
+}
+
+/* ============ SIDEBAR PANEL (TOPICS) ============ */
+.sidebar-panel {
+    position: fixed; top: 56px; left: -340px; width: 320px; bottom: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-right: 1px solid var(--border-subtle);
+    z-index: 90;
+    transition: left 0.4s var(--ease-smooth);
+    display: flex; flex-direction: column;
+    box-shadow: 4px 0 20px rgba(0,0,0,0.06);
+}
+.sidebar-panel.open { left: 0; }
+body.dark-theme .sidebar-panel { background: rgba(22, 27, 34, 0.95); }
+
+.sidebar-header {
+    padding: 20px 20px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-header h2 {
+    font-family: 'Noto Sans', sans-serif; font-size: 15px; font-weight: 600;
+    color: var(--text-grey-950); margin: 0;
+}
+body.dark-theme .sidebar-header h2 { color: #f0f6fc; }
+
+.sidebar-close {
+    width: 28px; height: 28px; border-radius: 50%; background: transparent; border: none;
+    color: #A1A3A7; font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.sidebar-close:hover { background: #F5F5F5; color: var(--text-grey-950); }
+body.dark-theme .sidebar-close:hover { background: rgba(255,255,255,0.1); color: #f0f6fc; }
+
+.sidebar-search {
+    padding: 0 20px 14px;
+}
+.sidebar-search input {
+    width: 100%; padding: 10px 14px;
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    background: #F9FAFB;
+    font-family: 'Noto Sans', sans-serif; font-size: 13px; color: var(--text-grey-900);
+    outline: none; transition: all 0.2s;
+}
+.sidebar-search input:focus {
+    border-color: var(--blue-primary); background: #FFFFFF;
+    box-shadow: 0 0 0 3px rgba(0,94,255,0.15);
+}
+body.dark-theme .sidebar-search input {
+    background: rgba(0,0,0,0.2); color: #e6edf3;
+}
+body.dark-theme .sidebar-search input:focus { background: #161b22; }
+
+.sidebar-list {
+    flex: 1; overflow-y: auto; padding: 0 12px 20px;
+}
+.sidebar-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: var(--radius-sm);
+    cursor: pointer; transition: background 0.2s;
+    margin-bottom: 2px;
+}
+.sidebar-item:hover { background: rgba(0, 94, 255, 0.08); }
+.sidebar-item .item-emoji { font-size: 16px; }
+.sidebar-item .item-label {
+    flex: 1; font-family: 'Noto Sans', sans-serif; font-size: 12px; font-weight: 500;
+    color: var(--text-grey-900);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body.dark-theme .sidebar-item .item-label { color: #e6edf3; }
+.sidebar-item .item-status {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 1.5px solid #A1A3A7; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.sidebar-item.visited .item-status {
+    background: var(--green-primary); border-color: var(--green-primary); color: #FFF;
+}
+
 /* ============ RESPONSIVE ============ */
 @media (max-width: 768px) {
     .toolbar-right .btn-tool span { display: none; }
     .btn-tool { padding: 7px 10px; }
     .detail-panel { width: 100%; right: -100%; }
+    .sidebar-panel { width: 100%; left: -100%; }
     .toolbar-title h1 { font-size: 13px; }
+    
+    /* Scrollbars less intrusive on mobile */
+    .scrollbar-h { bottom: 6px; left: 8px; right: 8px; height: 6px; }
+    .scrollbar-v { right: 6px; top: 8px; bottom: 8px; width: 6px; }
 
     /* ---- Node text wrapping for portrait / narrow screens ---- */
     .mm-node {
-        max-width: 240px;
-        padding: 8px 14px;
+        max-width: 220px;
+        padding: 8px 12px;
     }
 
     .node-label {
@@ -800,11 +909,11 @@ body.dark-theme .icon-sun  { display: block; }
     }
 
     .node-emoji { font-size: 14px; }
-    .node-content { gap: 7px; }
+    .node-content { gap: 6px; }
 
     .mm-node.level-0 {
-        max-width: 200px;
-        padding: 10px 16px;
+        max-width: 180px;
+        padding: 10px 14px;
     }
 
     .mm-node.level-0 .node-label {
@@ -815,20 +924,20 @@ body.dark-theme .icon-sun  { display: block; }
 /* Extra-narrow phones (portrait) */
 @media (max-width: 480px) {
     .mm-node {
-        max-width: 190px;
-        padding: 7px 12px;
+        max-width: 170px;
+        padding: 6px 10px;
     }
 
     .node-label {
-        font-size: 10.5px;
+        font-size: 10px;
         line-height: 1.3;
     }
 
-    .node-content { gap: 5px; }
-    .node-emoji { font-size: 13px; }
+    .node-content { gap: 4px; }
+    .node-emoji { font-size: 12px; }
 
     .mm-node.level-0 {
-        max-width: 170px;
-        padding: 8px 14px;
+        max-width: 150px;
+        padding: 8px 12px;
     }
 }
