@@ -21,7 +21,13 @@
     // ---- STATE ----
     const state = {
         nodes: [],
-        expandedIds: new Set(),  // start collapsed for progressive disclosure
+        expandedIds: (function () {
+            const ids = new Set(["root"]);
+            if (typeof MINDMAP_DATA !== "undefined" && MINDMAP_DATA.children) {
+                MINDMAP_DATA.children.slice(0, 3).forEach(c => ids.add(c.id));
+            }
+            return ids;
+        })(),
         visitedIds: new Set(),  // tracks which nodes have been opened (progress)
         zoom: 0.75,
         panX: 0,
@@ -157,12 +163,14 @@
     }
 
     /** Center viewport on a node at current zoom, without zoom-to-fit */
-    function centerOnNode(nodeId) {
+        function centerOnNode(nodeId) {
         const ni = state.nodes.find(n => n.data.id === nodeId);
         if (!ni) return;
         const vw = viewport.offsetWidth;
         const vh = viewport.offsetHeight;
-        const targetPanX = vw / 2 - ni.x * state.zoom;
+        // Position root node at the left side of the screen (e.g. 20% on desktop, 25% on mobile)
+        const fractionX = (nodeId === "root") ? (vw < 768 ? 0.25 : 0.20) : 0.5;
+        const targetPanX = vw * fractionX - ni.x * state.zoom;
         const targetPanY = vh / 2 - ni.y * state.zoom;
         animateTo(targetPanX, targetPanY, state.zoom);
     }
@@ -850,12 +858,15 @@
         if (node.children) node.children.forEach(c => expandRecursive(c));
     }
 
-    function collapseAll() {
+        function collapseAll() {
         state.expandedIds.clear();
         state.expandedIds.add("root");
+        if (typeof MINDMAP_DATA !== "undefined" && MINDMAP_DATA.children) {
+            MINDMAP_DATA.children.slice(0, 3).forEach(c => state.expandedIds.add(c.id));
+        }
         buildMindmap();
-        setTimeout(() => focusOnSubtree("root"), 80);
-        showToast("🔒 All branches collapsed", "info");
+        setTimeout(() => centerOnNode("root"), 80);
+        showToast("🔒 Branches collapsed", "info");
     }
 
     function resetView() {

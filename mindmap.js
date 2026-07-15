@@ -13,7 +13,7 @@
         level2Radius: 220,
         level3Radius: 150,
         animDelay: 60,
-        minZoom: 0.3,
+        minZoom: 0.45,
         maxZoom: 2.5,
         focusPadding: 120,   // px padding when zoom-to-fit
     };
@@ -21,8 +21,15 @@
     // ---- STATE ----
     const state = {
         nodes: [],
-        expandedIds: new Set(["root"]),
-        zoom: 0.55,
+        expandedIds: (function () {
+            const ids = new Set(["root"]);
+            if (typeof MINDMAP_DATA !== "undefined" && MINDMAP_DATA.children) {
+                MINDMAP_DATA.children.slice(0, 3).forEach(c => ids.add(c.id));
+            }
+            return ids;
+        })(),
+        visitedIds: new Set(),  // tracks which nodes have been opened (progress)
+        zoom: 0.75,
         panX: 0,
         panY: 0,
         // Smooth animation targets
@@ -55,23 +62,25 @@
         initTheme();
         createParticles();
         buildMindmap();
-        setTimeout(() => focusOnSubtree("root"), 50);
+        setTimeout(() => centerOnNode("root"), 50);
         bindGlobalEvents();
+        initSidebar();
+        bindScrollbarEvents();
     }
 
     // ---- THEME ----
     function initTheme() {
         const savedTheme = localStorage.getItem("mindmap-theme");
-        if (savedTheme === "light") {
-            document.body.classList.add("light-theme");
+        if (savedTheme === "dark") {
+            document.body.classList.add("dark-theme");
         }
     }
 
     function toggleTheme() {
-        document.body.classList.toggle("light-theme");
-        const isLight = document.body.classList.contains("light-theme");
-        localStorage.setItem("mindmap-theme", isLight ? "light" : "dark");
-        showToast(isLight ? "☀️ Light mode activated" : "🌙 Dark mode activated", "info");
+        document.body.classList.toggle("dark-theme");
+        const isDark = document.body.classList.contains("dark-theme");
+        localStorage.setItem("mindmap-theme", isDark ? "dark" : "light");
+        showToast(isDark ? "🌙 Dark mode" : "☀️ Light mode", "info");
     }
 
     // ---- PARTICLES ----
@@ -99,6 +108,7 @@
     function applyTransform() {
         clampPan();
         canvas.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+        updateScrollbars();
     }
 
     /** Keep the viewport within the bounding box of visible nodes */
@@ -116,7 +126,7 @@
 
         const vw = viewport.offsetWidth;
         const vh = viewport.offsetHeight;
-        const margin = 200; // extra breathing room
+        const margin = 100; // tighter clamp keeps root node visible
 
         // Converted to screen space:  screenX = panX + worldX * zoom
         // We want the bounding box to stay within the viewport ± margin
@@ -134,6 +144,8 @@
         if (topLimit > bottomLimit) {
             state.panY = Math.min(topLimit, Math.max(bottomLimit, state.panY));
         }
+        
+        state.panLimits = { leftLimit, rightLimit, topLimit, bottomLimit };
     }
 
     // ============================================================
@@ -148,6 +160,19 @@
         const bbox = getSubtreeBBox(nodeId);
         if (!bbox) return;
         zoomToFitBBox(bbox);
+    }
+
+    /** Center viewport on a node at current zoom, without zoom-to-fit */
+        function centerOnNode(nodeId) {
+        const ni = state.nodes.find(n => n.data.id === nodeId);
+        if (!ni) return;
+        const vw = viewport.offsetWidth;
+        const vh = viewport.offsetHeight;
+        // Position root node at the left side of the screen (e.g. 20% on desktop, 25% on mobile)
+        const fractionX = (nodeId === "root") ? (vw < 768 ? 0.25 : 0.20) : 0.5;
+        const targetPanX = vw * fractionX - ni.x * state.zoom;
+        const targetPanY = vh / 2 - ni.y * state.zoom;
+        animateTo(targetPanX, targetPanY, state.zoom);
     }
 
     /** Get the bounding box (world coords) of a node + visible descendants */
@@ -188,7 +213,10 @@
     function zoomToFitBBox(bbox) {
         const vw = viewport.offsetWidth;
         const vh = viewport.offsetHeight;
-        const pad = CONFIG.focusPadding;
+        
+        // Use much smaller padding on narrow screens (e.g. mobile)
+        const isMobile = vw < 768;
+        const pad = isMobile ? 30 : CONFIG.focusPadding;
 
         const bboxW = bbox.maxX - bbox.minX;
         const bboxH = bbox.maxY - bbox.minY;
@@ -197,7 +225,11 @@
         const zoomX = (vw - pad * 2) / bboxW;
         const zoomY = (vh - pad * 2) / bboxH;
         let targetZoom = Math.min(zoomX, zoomY);
-        targetZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, targetZoom));
+        
+        // On mobile, if targetZoom is extremely small (e.g., trying to fit a very wide tree
+        // into a portrait screen), clamp it to a readable minimum so nodes aren't microscopic.
+        const effectiveMinZoom = isMobile ? Math.max(0.75, CONFIG.minZoom) : Math.max(0.5, CONFIG.minZoom);
+        targetZoom = Math.max(effectiveMinZoom, Math.min(CONFIG.maxZoom, targetZoom));
 
         // Center of the bbox in world coords
         const cx = (bbox.minX + bbox.maxX) / 2;
@@ -262,8 +294,69 @@
     function buildMindmap() {
         clearCanvas();
         state.nodes = [];
-        layoutNode(MINDMAP_DATA, CONFIG.centerX, CONFIG.centerY, 0, null);
+        
+        let currentY = 0;
+        const paddingX = 400; // horizontal spacing between depths
+        const paddingY = 80;  // vertical spacing between leaves
+        
+        // 1. Compute abstract layout
+        function computeLayout(node, depth) {
+            if (!node.children || node.children.length === 0 || !state.expandedIds.has(node.id)) {
+                node.x = depth * paddingX;
+                node.y = currentY;
+                currentY += paddingY;
+            } else {
+                node.x = depth * paddingX;
+                let startY = currentY;
+                node.children.forEach(c => computeLayout(c, depth + 1));
+                let endY = currentY - paddingY;
+                node.y = (startY + endY) / 2;
+            }
+            node.level = depth;
+        }
+        
+        computeLayout(MINDMAP_DATA, 0);
+        
+        // Offset so root starts at centerX/Y
+        const offsetY = CONFIG.centerY - MINDMAP_DATA.y;
+        const offsetX = CONFIG.centerX; 
+        
+        // 2. Create DOM elements
+        function renderNodeTree(data, delayIndex, parentBranchIndex) {
+            const branchIdx = data.branchIndex || parentBranchIndex || 1;
+            const cx = data.x + offsetX;
+            const cy = data.y + offsetY;
+            
+            const nodeInfo = { data, x: cx, y: cy, branchIndex: branchIdx, element: null, width: 0 };
+            state.nodes.push(nodeInfo);
+
+            const el = createNodeElement(data, cx, cy, branchIdx, delayIndex);
+            nodeInfo.element = el;
+            canvas.appendChild(el);
+            
+            if (data.children && data.children.length > 0 && state.expandedIds.has(data.id)) {
+                data.children.forEach((child, i) => {
+                    renderNodeTree(child, delayIndex + i + 1, branchIdx);
+                });
+            }
+        }
+        
+        renderNodeTree(MINDMAP_DATA, 0, null);
+        
+        // 3. Measure widths for connections before scaling down
+        state.nodes.forEach(n => {
+            n.width = n.element.offsetWidth;
+        });
+
+        // 4. Render connections based on real widths
         renderConnections();
+
+        // 5. Hide nodes for animation
+        state.nodes.forEach(n => {
+            n.element.style.transform = "translate(0, -50%) scale(0)";
+            n.element.style.opacity = "0";
+        });
+
         animateNodesIn();
     }
 
@@ -272,108 +365,80 @@
         connectionsLayer.innerHTML = "";
     }
 
-    // ---- LAYOUT ENGINE ----
-    function layoutNode(data, cx, cy, delayIndex, parentBranchIndex) {
-        const branchIdx = data.branchIndex || parentBranchIndex || 1;
-        const nodeInfo = { data, x: cx, y: cy, branchIndex: branchIdx, element: null };
-        state.nodes.push(nodeInfo);
-
-        const el = createNodeElement(data, cx, cy, branchIdx, delayIndex);
-        nodeInfo.element = el;
-        canvas.appendChild(el);
-
-        if (data.children && data.children.length > 0 && state.expandedIds.has(data.id)) {
-            const childCount = data.children.length;
-            let radius, startAngle, totalAngle;
-
-            if (data.level === 0) {
-                radius = CONFIG.level1Radius;
-                startAngle = -Math.PI / 2;
-                totalAngle = Math.PI * 2;
-            } else if (data.level === 1) {
-                radius = CONFIG.level2Radius;
-                const baseAngle = Math.atan2(cy - CONFIG.centerY, cx - CONFIG.centerX);
-                totalAngle = Math.PI * 0.7;
-                startAngle = baseAngle - totalAngle / 2;
-            } else {
-                radius = CONFIG.level3Radius;
-                const baseAngle = Math.atan2(cy - CONFIG.centerY, cx - CONFIG.centerX);
-                totalAngle = Math.PI * 0.5;
-                startAngle = baseAngle - totalAngle / 2;
-            }
-
-            data.children.forEach((child, i) => {
-                let angle;
-                if (data.level === 0) {
-                    angle = startAngle + (totalAngle / childCount) * i;
-                } else {
-                    angle = childCount === 1
-                        ? startAngle + totalAngle / 2
-                        : startAngle + (totalAngle / (childCount - 1 || 1)) * i;
-                }
-                const childX = cx + Math.cos(angle) * radius;
-                const childY = cy + Math.sin(angle) * radius;
-                layoutNode(child, childX, childY, delayIndex + i + 1, branchIdx);
-            });
-        }
-    }
-
     // ---- CREATE NODE ELEMENT ----
     function createNodeElement(data, x, y, branchIndex, delayIndex) {
         const el = document.createElement("div");
-        el.className = `mm-node level-${data.level} branch-${branchIndex}`;
+        const isExpandedNode = state.expandedIds.has(data.id) && data.children && data.children.length > 0;
+        const isVisited = state.visitedIds.has(data.id);
+        el.className = `mm-node level-${data.level} branch-${branchIndex}${isExpandedNode ? ' is-expanded' : ''}${isVisited ? ' is-visited' : ''}`;
         el.dataset.id = data.id;
         el.style.left = x + "px";
         el.style.top = y + "px";
-        el.style.transform = "translate(-50%, -50%) scale(0)";
+        el.style.transform = "translate(0, -50%) scale(1)";
+
+        const isExpanded = state.expandedIds.has(data.id);
+        const hasChildren = data.children && data.children.length > 0;
+        const hasDetail = data.description || data.fact || data.quiz;
+
+        const labelText = data.label.replace(/\n/g, " ");
+        let innerHTML = `<div class="node-content">`;
 
         if (data.emoji) {
-            const emojiSpan = document.createElement("span");
-            emojiSpan.className = "node-emoji";
-            emojiSpan.textContent = data.emoji;
-            el.appendChild(emojiSpan);
+            innerHTML += `<span class="node-emoji">${data.emoji}</span>`;
         }
 
-        const label = document.createElement("span");
-        label.className = "node-label";
-        label.textContent = data.label.replace(/\n/g, " ");
-        el.appendChild(label);
+        innerHTML += `<span class="node-label">${labelText}</span>`;
 
-        // Expand / collapse button
-        if (data.children && data.children.length > 0) {
-            const expandBtn = document.createElement("div");
-            const isExpanded = state.expandedIds.has(data.id);
-            expandBtn.className = "node-expand-btn" + (isExpanded ? " expanded" : "");
-            expandBtn.textContent = "+";
-            expandBtn.title = isExpanded ? "Collapse" : "Expand";
+        // Checkpoint dot — looks like ○ when unvisited, green ✓ circle when visited
+        if (hasDetail) {
+            if (isVisited) {
+                innerHTML += `<div class="node-info-trigger checked" title="Visited ✓">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>`;
+            } else {
+                innerHTML += `<div class="node-info-trigger" title="View details">○</div>`;
+            }
+        }
+
+        // Expand chevron — LEFT-facing (<) since tree flows left→right
+        if (hasChildren) {
+            innerHTML += `<div class="node-expand-btn ${isExpanded ? 'expanded' : ''}" title="${isExpanded ? 'Collapse' : 'Expand'}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" class="chevron">
+                    <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>`;
+        }
+
+        innerHTML += `</div>`;
+        el.innerHTML = innerHTML;
+
+        // Expand button: only handles expand/collapse
+        const expandBtn = el.querySelector(".node-expand-btn");
+        if (expandBtn) {
             expandBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 toggleExpand(data.id);
             });
-            el.appendChild(expandBtn);
         }
 
-        // Info button
-        if (data.description || data.quiz) {
-            const infoBtn = document.createElement("div");
-            infoBtn.className = "node-info-btn";
-            infoBtn.textContent = "i";
-            infoBtn.title = "Learn more";
-            infoBtn.addEventListener("click", (e) => {
+        // Dot (checkpoint): opens detail panel (auto-marks visited on open)
+        const infoTrigger = el.querySelector(".node-info-trigger");
+        if (infoTrigger) {
+            infoTrigger.addEventListener("click", (e) => {
                 e.stopPropagation();
                 openDetail(data);
             });
-            el.appendChild(infoBtn);
         }
 
-        // Main click — expand/collapse + focus
+        // Clicking anywhere on the node body also opens details
         el.addEventListener("click", () => {
-            if (data.children && data.children.length > 0) {
-                toggleExpand(data.id);
-            } else {
+            if (hasDetail) {
                 openDetail(data);
-                // Focus on leaf node
-                focusOnSubtree(data.id);
+            }
+            if (!hasDetail && hasChildren) {
+                toggleExpand(data.id);
             }
         });
 
@@ -387,7 +452,7 @@
         nodeEls.forEach((el) => {
             const delay = parseInt(el.dataset.delay) * CONFIG.animDelay;
             setTimeout(() => {
-                el.style.transform = "translate(-50%, -50%) scale(1)";
+                el.style.transform = "translate(0, -50%) scale(1)";
                 el.style.opacity = "1";
                 el.classList.add("visible");
             }, delay);
@@ -395,29 +460,43 @@
     }
 
     // ============================================================
-    //  EXPAND / COLLAPSE  —  with focus management
+    //  EXPAND / COLLAPSE
     // ============================================================
 
     function toggleExpand(id) {
         if (state.expandedIds.has(id)) {
-            // ---- COLLAPSE ----
             collapseRecursive(id);
             buildMindmap();
-
-            // Focus on the parent of the collapsed node (or root)
+        } else {
+            let siblingsCollapsed = false;
+            // Close siblings (accordion style)
             const parentId = findParentId(MINDMAP_DATA, id);
             if (parentId) {
-                focusOnSubtree(parentId);
-            } else {
-                focusOnSubtree("root");
+                const parentNode = findNodeData(MINDMAP_DATA, parentId);
+                if (parentNode && parentNode.children) {
+                    parentNode.children.forEach(sibling => {
+                        if (sibling.id !== id && state.expandedIds.has(sibling.id)) {
+                            collapseRecursive(sibling.id);
+                            siblingsCollapsed = true;
+                        }
+                    });
+                }
             }
-        } else {
-            // ---- EXPAND ----
+            
             state.expandedIds.add(id);
             buildMindmap();
 
-            // Focus on this node + its newly-revealed children
-            setTimeout(() => focusOnSubtree(id), 50);
+            // Only focus if we didn't just replace a sibling branch
+            if (!siblingsCollapsed) {
+                const nodeData = findNodeData(MINDMAP_DATA, id);
+                const childCount = nodeData?.children?.length || 0;
+                if (childCount > 10) {
+                    // Large trees: center on node without zooming out to illegible levels
+                    setTimeout(() => centerOnNode(id), 50);
+                } else {
+                    setTimeout(() => focusOnSubtree(id), 50);
+                }
+            }
         }
     }
 
@@ -440,7 +519,6 @@
         return null;
     }
 
-    /** Walk the tree to find the parent of a given node ID */
     function findParentId(tree, targetId, currentParentId = null) {
         if (tree.id === targetId) return currentParentId;
         if (tree.children) {
@@ -468,12 +546,19 @@
             if (!childNode) return;
 
             const branchIdx = child.branchIndex || parentNode.branchIndex;
-            const path = createCurvedPath(parentNode.x, parentNode.y, childNode.x, childNode.y);
+            
+            // X coordinates logic: Parent right side edge -> Child left side edge
+            const x1 = parentNode.x + parentNode.width;
+            const y1 = parentNode.y;
+            const x2 = childNode.x;
+            const y2 = childNode.y;
+
+            const path = createCurvedPath(x1, y1, x2, y2);
             const svgPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
             svgPath.setAttribute("d", path);
             svgPath.setAttribute("class", `connection-path branch-${branchIdx}`);
 
-            const length = estimatePathLength(parentNode.x, parentNode.y, childNode.x, childNode.y);
+            const length = estimatePathLength(x1, y1, x2, y2);
             svgPath.style.strokeDasharray = length;
             svgPath.style.strokeDashoffset = length;
             svgPath.style.transition = `stroke-dashoffset 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94)`;
@@ -485,13 +570,13 @@
     }
 
     function createCurvedPath(x1, y1, x2, y2) {
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        return `M ${x1} ${y1} C ${x1 + dx * 0.4} ${y1}, ${x1 + dx * 0.6} ${y2}, ${x2} ${y2}`;
+        // Horizontal cubic bezier curve
+        const controlOffset = Math.abs(x2 - x1) * 0.5;
+        return `M ${x1} ${y1} C ${x1 + controlOffset} ${y1}, ${x2 - controlOffset} ${y2}, ${x2} ${y2}`;
     }
 
     function estimatePathLength(x1, y1, x2, y2) {
-        return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) * 1.3;
+        return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) * 1.5;
     }
 
     // ============================================================
@@ -499,9 +584,32 @@
     // ============================================================
 
     function openDetail(data) {
+        // Mark node as active (gradient stroke)
+        canvas.querySelectorAll(".mm-node.is-active").forEach(n => n.classList.remove("is-active"));
+        const activeEl = canvas.querySelector(`.mm-node[data-id="${data.id}"]`);
+        if (activeEl) activeEl.classList.add("is-active");
+
+        // Auto-mark as visited + update dot in-place (no full rebuild)
+        if (!state.visitedIds.has(data.id)) {
+            state.visitedIds.add(data.id);
+            if (activeEl) {
+                const dot = activeEl.querySelector(".node-info-trigger");
+                if (dot) {
+                    dot.classList.add("checked");
+                    dot.title = "Visited ✓";
+                    dot.textContent = "";  // remove ○ character
+                    dot.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>`;
+                }
+            }
+        }
+
         let html = "";
         if (data.emoji) html += `<span class="detail-emoji">${data.emoji}</span>`;
         html += `<h2>${data.label.replace(/\n/g, " ")}</h2>`;
+
+
         if (data.description) html += `<p class="detail-description">${data.description}</p>`;
 
         if (data.keywords && data.keywords.length > 0) {
@@ -536,6 +644,7 @@
 
     function closeDetail() {
         detailPanel.classList.remove("open");
+        canvas.querySelectorAll(".mm-node.is-active").forEach(n => n.classList.remove("is-active"));
     }
 
     // ============================================================
@@ -632,8 +741,23 @@
 
         window.addEventListener("mouseup", () => { state.isPanning = false; });
 
-        // ---- Touch pan ----
+        // ---- Touch pan & pinch zoom ----
         let touchStartX, touchStartY, touchStartPanX, touchStartPanY;
+        let initialPinchDistance = null;
+        let initialPinchZoom = null;
+        let initialPinchCenter = null;
+
+        function getDistance(t1, t2) {
+            return Math.sqrt((t2.clientX - t1.clientX) ** 2 + (t2.clientY - t1.clientY) ** 2);
+        }
+
+        function getCenter(t1, t2) {
+            return {
+                x: (t1.clientX + t2.clientX) / 2,
+                y: (t1.clientY + t2.clientY) / 2
+            };
+        }
+
         viewport.addEventListener("touchstart", (e) => {
             if (e.touches.length === 1 && !e.target.closest(".mm-node")) {
                 cancelAnimation();
@@ -641,18 +765,48 @@
                 touchStartY = e.touches[0].clientY;
                 touchStartPanX = state.panX;
                 touchStartPanY = state.panY;
+            } else if (e.touches.length === 2) {
+                cancelAnimation();
+                initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+                initialPinchZoom = state.zoom;
+                const center = getCenter(e.touches[0], e.touches[1]);
+                const rect = viewport.getBoundingClientRect();
+                initialPinchCenter = {
+                    x: center.x - rect.left,
+                    y: center.y - rect.top
+                };
             }
-        }, { passive: true });
+        }, { passive: false });
 
         viewport.addEventListener("touchmove", (e) => {
             if (e.touches.length === 1 && touchStartX !== undefined) {
                 state.panX = touchStartPanX + (e.touches[0].clientX - touchStartX);
                 state.panY = touchStartPanY + (e.touches[0].clientY - touchStartY);
                 applyTransform();
-            }
-        }, { passive: true });
+            } else if (e.touches.length === 2 && initialPinchDistance !== null) {
+                e.preventDefault(); // prevent native scroll/zoom
+                const currentDistance = getDistance(e.touches[0], e.touches[1]);
+                const distanceRatio = currentDistance / initialPinchDistance;
+                
+                const newZoom = Math.max(CONFIG.minZoom, Math.min(CONFIG.maxZoom, initialPinchZoom * distanceRatio));
+                const zoomRatio = newZoom / state.zoom;
 
-        viewport.addEventListener("touchend", () => { touchStartX = undefined; });
+                state.zoom = newZoom;
+                state.panX = initialPinchCenter.x - (initialPinchCenter.x - state.panX) * zoomRatio;
+                state.panY = initialPinchCenter.y - (initialPinchCenter.y - state.panY) * zoomRatio;
+                
+                applyTransform();
+            }
+        }, { passive: false });
+
+        viewport.addEventListener("touchend", (e) => {
+            if (e.touches.length < 2) {
+                initialPinchDistance = null;
+            }
+            if (e.touches.length === 0) {
+                touchStartX = undefined;
+            }
+        });
 
         // ---- Wheel zoom ----
         viewport.addEventListener("wheel", (e) => {
@@ -704,16 +858,239 @@
         if (node.children) node.children.forEach(c => expandRecursive(c));
     }
 
-    function collapseAll() {
+        function collapseAll() {
         state.expandedIds.clear();
         state.expandedIds.add("root");
+        if (typeof MINDMAP_DATA !== "undefined" && MINDMAP_DATA.children) {
+            MINDMAP_DATA.children.slice(0, 3).forEach(c => state.expandedIds.add(c.id));
+        }
         buildMindmap();
-        setTimeout(() => focusOnSubtree("root"), 80);
-        showToast("🔒 All branches collapsed", "info");
+        setTimeout(() => centerOnNode("root"), 80);
+        showToast("🔒 Branches collapsed", "info");
     }
 
     function resetView() {
         collapseAll();
+    }
+
+    // ============================================================
+    //  SCROLLBARS & SIDEBAR
+    // ============================================================
+
+    function updateScrollbars() {
+        if (!state.panLimits) return;
+        const { leftLimit, rightLimit, topLimit, bottomLimit } = state.panLimits;
+        
+        const scrollbarH = document.getElementById("scrollbarH");
+        const scrollbarHThumb = document.getElementById("scrollbarHThumb");
+        const scrollbarV = document.getElementById("scrollbarV");
+        const scrollbarVThumb = document.getElementById("scrollbarVThumb");
+        
+        if (!scrollbarH || !scrollbarHThumb) return;
+
+        const panXRange = leftLimit - rightLimit;
+        if (panXRange <= 0) {
+            scrollbarHThumb.style.width = "100%";
+            scrollbarHThumb.style.left = "0";
+            scrollbarH.style.opacity = "0";
+            scrollbarH.style.pointerEvents = "none";
+        } else {
+            scrollbarH.style.opacity = "1";
+            scrollbarH.style.pointerEvents = "all";
+            const fracX = (leftLimit - state.panX) / panXRange;
+            const thumbWidthPct = Math.max(10, Math.min(100, (viewport.offsetWidth / (viewport.offsetWidth + panXRange)) * 100));
+            scrollbarHThumb.style.width = `${thumbWidthPct}%`;
+            const leftPct = fracX * (100 - thumbWidthPct);
+            scrollbarHThumb.style.left = `${leftPct}%`;
+        }
+
+        const panYRange = topLimit - bottomLimit;
+        if (panYRange <= 0) {
+            scrollbarVThumb.style.height = "100%";
+            scrollbarVThumb.style.top = "0";
+            scrollbarV.style.opacity = "0";
+            scrollbarV.style.pointerEvents = "none";
+        } else {
+            scrollbarV.style.opacity = "1";
+            scrollbarV.style.pointerEvents = "all";
+            const fracY = (topLimit - state.panY) / panYRange;
+            const thumbHeightPct = Math.max(10, Math.min(100, (viewport.offsetHeight / (viewport.offsetHeight + panYRange)) * 100));
+            scrollbarVThumb.style.height = `${thumbHeightPct}%`;
+            const topPct = fracY * (100 - thumbHeightPct);
+            scrollbarVThumb.style.top = `${topPct}%`;
+        }
+    }
+
+    function bindScrollbarEvents() {
+        const hThumb = document.getElementById("scrollbarHThumb");
+        const vThumb = document.getElementById("scrollbarVThumb");
+        if (!hThumb || !vThumb) return;
+        
+        let isDraggingH = false, isDraggingV = false;
+        let startClientX, startClientY, startPanX, startPanY;
+
+        hThumb.addEventListener("mousedown", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingH = true; startClientX = e.clientX; startPanX = state.panX;
+            cancelAnimation();
+        });
+        
+        vThumb.addEventListener("mousedown", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingV = true; startClientY = e.clientY; startPanY = state.panY;
+            cancelAnimation();
+        });
+
+        window.addEventListener("mousemove", (e) => {
+            if (isDraggingH && state.panLimits) {
+                const dx = e.clientX - startClientX;
+                const track = document.getElementById("scrollbarH");
+                const trackWidth = track.offsetWidth;
+                const thumbWidth = hThumb.offsetWidth;
+                if (trackWidth > thumbWidth) {
+                    const dxFrac = dx / (trackWidth - thumbWidth);
+                    const panXRange = state.panLimits.leftLimit - state.panLimits.rightLimit;
+                    state.panX = startPanX - (dxFrac * panXRange);
+                    applyTransform();
+                }
+            }
+            if (isDraggingV && state.panLimits) {
+                const dy = e.clientY - startClientY;
+                const track = document.getElementById("scrollbarV");
+                const trackHeight = track.offsetHeight;
+                const thumbHeight = vThumb.offsetHeight;
+                if (trackHeight > thumbHeight) {
+                    const dyFrac = dy / (trackHeight - thumbHeight);
+                    const panYRange = state.panLimits.topLimit - state.panLimits.bottomLimit;
+                    state.panY = startPanY - (dyFrac * panYRange);
+                    applyTransform();
+                }
+            }
+        });
+
+        window.addEventListener("mouseup", () => {
+            isDraggingH = false; isDraggingV = false;
+        });
+        
+        // Touch events for scrollbars
+        hThumb.addEventListener("touchstart", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingH = true; startClientX = e.touches[0].clientX; startPanX = state.panX;
+            cancelAnimation();
+        }, { passive: false });
+        
+        vThumb.addEventListener("touchstart", (e) => {
+            e.stopPropagation(); e.preventDefault();
+            isDraggingV = true; startClientY = e.touches[0].clientY; startPanY = state.panY;
+            cancelAnimation();
+        }, { passive: false });
+        
+        window.addEventListener("touchmove", (e) => {
+            if (isDraggingH && state.panLimits) {
+                const dx = e.touches[0].clientX - startClientX;
+                const track = document.getElementById("scrollbarH");
+                const trackWidth = track.offsetWidth;
+                const thumbWidth = hThumb.offsetWidth;
+                if (trackWidth > thumbWidth) {
+                    const dxFrac = dx / (trackWidth - thumbWidth);
+                    const panXRange = state.panLimits.leftLimit - state.panLimits.rightLimit;
+                    state.panX = startPanX - (dxFrac * panXRange);
+                    applyTransform();
+                }
+            }
+            if (isDraggingV && state.panLimits) {
+                const dy = e.touches[0].clientY - startClientY;
+                const track = document.getElementById("scrollbarV");
+                const trackHeight = track.offsetHeight;
+                const thumbHeight = vThumb.offsetHeight;
+                if (trackHeight > thumbHeight) {
+                    const dyFrac = dy / (trackHeight - thumbHeight);
+                    const panYRange = state.panLimits.topLimit - state.panLimits.bottomLimit;
+                    state.panY = startPanY - (dyFrac * panYRange);
+                    applyTransform();
+                }
+            }
+        }, { passive: false });
+        
+        window.addEventListener("touchend", () => {
+            isDraggingH = false; isDraggingV = false;
+        });
+    }
+
+    function initSidebar() {
+        const btnSidebar = document.getElementById("btnSidebar");
+        const sidebarPanel = document.getElementById("sidebarPanel");
+        const sidebarClose = document.getElementById("sidebarClose");
+        const sidebarSearch = document.getElementById("sidebarSearch");
+        
+        if (!btnSidebar || !sidebarPanel) return;
+        
+        btnSidebar.addEventListener("click", () => {
+            sidebarPanel.classList.toggle("open");
+            if (sidebarPanel.classList.contains("open")) {
+                renderSidebarList("");
+                sidebarSearch.focus();
+            }
+        });
+        
+        sidebarClose.addEventListener("click", () => {
+            sidebarPanel.classList.remove("open");
+        });
+        
+        sidebarSearch.addEventListener("input", (e) => {
+            renderSidebarList(e.target.value);
+        });
+    }
+
+    function renderSidebarList(query) {
+        const listContainer = document.getElementById("sidebarList");
+        if (!listContainer) return;
+        
+        const q = query.toLowerCase();
+        let html = "";
+        
+        const topics = MINDMAP_DATA.children || [];
+        
+        topics.forEach(t => {
+            if (t.label.toLowerCase().includes(q) || (t.keywords && t.keywords.some(k => k.toLowerCase().includes(q)))) {
+                const isVisited = state.visitedIds.has(t.id);
+                html += `
+                    <div class="sidebar-item ${isVisited ? 'visited' : ''}" data-id="${t.id}">
+                        <span class="item-emoji">${t.emoji || '📄'}</span>
+                        <span class="item-label" title="${t.label.replace(/\n/g, ' ')}">${t.label.replace(/\n/g, ' ')}</span>
+                        <div class="item-status">
+                            ${isVisited ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+        
+        if (html === "") {
+            html = `<div style="padding: 20px; text-align: center; color: #6B7280; font-size: 12px;">No topics found.</div>`;
+        }
+        
+        listContainer.innerHTML = html;
+        
+        listContainer.querySelectorAll(".sidebar-item").forEach(item => {
+            item.addEventListener("click", () => {
+                const id = item.dataset.id;
+                if (!state.expandedIds.has("root")) {
+                    state.expandedIds.add("root");
+                    buildMindmap();
+                }
+                setTimeout(() => {
+                    centerOnNode(id);
+                    const nodeData = findNodeData(MINDMAP_DATA, id);
+                    if (nodeData && (nodeData.description || nodeData.fact || nodeData.quiz)) {
+                        openDetail(nodeData);
+                    }
+                    if (window.innerWidth <= 768) {
+                        document.getElementById("sidebarPanel").classList.remove("open");
+                    }
+                }, 100);
+            });
+        });
     }
 
     // ---- START ----
